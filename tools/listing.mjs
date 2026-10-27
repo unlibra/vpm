@@ -27,7 +27,8 @@ export function validatePackage(manifest, id, version, repository) {
     'Package URL must identify its immutable GitHub Release asset.');
   requireThat(/^[0-9a-f]{64}$/.test(manifest.zipSHA256), 'Missing valid ZIP SHA-256.');
   requireThat(typeof manifest.displayName === 'string' && manifest.displayName.length > 0 &&
-    manifest.author?.name && manifest.author?.email && manifest.license && manifest.unity, 'Incomplete package manifest.');
+    typeof manifest.author?.name === 'string' && typeof manifest.author?.email === 'string' &&
+    typeof manifest.license === 'string' && typeof manifest.unity === 'string', 'Incomplete package manifest.');
   requireThat(!['legacyFolders', 'legacyFiles', 'legacyPackages'].some(k => Object.keys(manifest[k] ?? {}).length),
     'Automatic legacy deletion has not been verified for these packages.');
   return manifest;

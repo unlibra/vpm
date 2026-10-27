@@ -1,3 +1,7 @@
+import {crc32} from 'node:zlib';
+import {verifyArchive} from './archive.mjs';
+import {checkHistory} from './history.mjs';
+import {execFileSync} from 'node:child_process';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {build,listing,validatePackage} from './listing.mjs';import {importRelease} from './import-release.mjs';
 const id='com.unlibra.mururu-blink-lipsync', repository='unlibra/mururu-blink-lipsync', version='1.2.0';
@@ -5,7 +9,7 @@ const source={name:'unlibra VPM Repository',id:'com.unlibra.vpm',url:'https://do
 const manifest={name:id,version,displayName:'Mururu Blink & LipSync',author:{name:'unlibra',email:'63234154+unlibra@users.noreply.github.com'},unity:'2022.3',license:'SEE LICENSE IN LICENSE.txt',url:`https://github.com/${repository}/releases/download/v${version}/${id}-${version}.zip`};
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'unlibra-vpm-'));fs.writeFileSync(path.join(root,'source.json'),JSON.stringify(source));t.after(()=>{assert.equal(path.dirname(root),os.tmpdir());assert.ok(path.basename(root).startsWith('unlibra-vpm-'));fs.rmSync(root,{recursive:true,force:true});});return root;}
 test('empty listing has an explicit preparation page and VCC registration URL',t=>{const root=fixture(t);assert.deepEqual(build(root).packages,{});const html=fs.readFileSync(path.join(root,'site/index.html'),'utf8');assert.match(html,/準備中/);assert.ok(html.includes('vcc://vpm/addRepo?url='+encodeURIComponent(source.url)));});
-test('published stable versions are imported once and retained together',async t=>{const root=fixture(t);const tag='v'+version;const names=['package.json',`${id}-${version}.zip`];const response=(name)=>new Response(name==='package.json'?JSON.stringify(manifest):Buffer.from('verified-zip-fixture'));const release={tag_name:tag,draft:false,prerelease:false,assets:names.map(name=>({name,browser_download_url:`https://github.com/${repository}/releases/download/${tag}/${name}`}))};const fetcher=async url=>url.includes('api.github.com')?new Response(JSON.stringify(release)):response(url.endsWith('package.json')?'package.json':'zip');assert.equal(await importRelease(root,id,tag,fetcher),true);assert.equal(await importRelease(root,id,tag,fetcher),false);const result=build(root);assert.match(result.packages[id].versions[version].zipSHA256,/^[0-9a-f]{64}$/);const previous={...result.packages[id].versions[version],version:'1.1.9',url:`https://github.com/${repository}/releases/download/v1.1.9/${id}-1.1.9.zip`};fs.writeFileSync(path.join(root,'packages',id,'1.1.9.json'),JSON.stringify(previous));assert.equal(Object.keys(listing(root).packages[id].versions).length,2);const changed=async url=>url.includes('api.github.com')?new Response(JSON.stringify(release)):url.endsWith('package.json')?response('package.json'):new Response('changed-zip');await assert.rejects(importRelease(root,id,tag,changed),/immutable/);});
+test('published stable versions are imported once and retained together',async t=>{const root=fixture(t);const tag='v'+version;const names=['package.json',`${id}-${version}.zip`];const response=(name)=>new Response(name==='package.json'?JSON.stringify(manifest):zipFixture(Buffer.from(JSON.stringify(manifest))));const release={tag_name:tag,draft:false,prerelease:false,assets:names.map(name=>({name,browser_download_url:`https://github.com/${repository}/releases/download/${tag}/${name}`}))};const fetcher=async url=>url.includes('api.github.com')?new Response(JSON.stringify(release)):response(url.endsWith('package.json')?'package.json':'zip');assert.equal(await importRelease(root,id,tag,fetcher),true);assert.equal(await importRelease(root,id,tag,fetcher),false);const result=build(root);assert.match(result.packages[id].versions[version].zipSHA256,/^[0-9a-f]{64}$/);const previous={...result.packages[id].versions[version],version:'1.1.9',url:`https://github.com/${repository}/releases/download/v1.1.9/${id}-1.1.9.zip`};fs.writeFileSync(path.join(root,'packages',id,'1.1.9.json'),JSON.stringify(previous));assert.equal(Object.keys(listing(root).packages[id].versions).length,2);const changed=async url=>url.includes('api.github.com')?new Response(JSON.stringify(release)):url.endsWith('package.json')?response('package.json'):new Response('changed-zip');await assert.rejects(importRelease(root,id,tag,changed),/ZIP|immutable/);});
 test('identity, URL, hash and unverified deletion metadata are rejected',()=>{const good={...manifest,zipSHA256:'a'.repeat(64)};for(const changed of [{name:'com.other.tool'},{version:'9.9.9'},{url:'https://example.com/file.zip'},{zipSHA256:'bad'},{legacyFolders:{'Assets/Anything':''}},{author:{name:'unlibra'}}])assert.throws(()=>validatePackage({...good,...changed},id,version,repository));});
 test('source metadata and untrusted filesystem entries fail closed',t=>{const root=fixture(t);fs.writeFileSync(path.join(root,'source.json'),JSON.stringify({...source,url:'https://example.com/index.json'}));assert.throws(()=>build(root),/metadata/);fs.writeFileSync(path.join(root,'source.json'),JSON.stringify(source));fs.mkdirSync(path.join(root,'packages',id),{recursive:true});fs.writeFileSync(path.join(root,'packages',id,'latest.json'),'{}');assert.throws(()=>build(root),/filename/);});
 test('draft release and unknown package imports do not write files', async t => {
@@ -14,4 +18,32 @@ test('draft release and unknown package imports do not write files', async t => 
   const draft = async () => new Response(JSON.stringify({ tag_name: 'v1.2.0', draft: true }));
   await assert.rejects(importRelease(root, id, 'v1.2.0', draft), /published stable/);
   assert.ok(!fs.existsSync(path.join(root, 'packages')));
+});
+
+function zipFixture(manifestBytes, overrides = {}) {
+  const files = new Map(Object.entries({ 'package.json': manifestBytes, 'LICENSE.txt': Buffer.from('license'), 'NOTICE.txt': Buffer.from('notice'), ...overrides }));
+  const locals=[], central=[]; let offset=0;
+  for(const [name,bytes] of files) {
+    const encoded=Buffer.from(name), local=Buffer.alloc(30), entry=Buffer.alloc(46), crc=crc32(bytes);
+    local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt32LE(crc,14);local.writeUInt32LE(bytes.length,18);local.writeUInt32LE(bytes.length,22);local.writeUInt16LE(encoded.length,26);
+    entry.writeUInt32LE(0x02014b50);entry.writeUInt16LE(20,4);entry.writeUInt16LE(20,6);entry.writeUInt32LE(crc,16);entry.writeUInt32LE(bytes.length,20);entry.writeUInt32LE(bytes.length,24);entry.writeUInt16LE(encoded.length,28);entry.writeUInt32LE(offset,42);
+    locals.push(local,encoded,bytes);central.push(entry,encoded);offset+=30+encoded.length+bytes.length;
+  }
+  const directory=Buffer.concat(central),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(files.size,8);end.writeUInt16LE(files.size,10);end.writeUInt32LE(directory.length,12);end.writeUInt32LE(offset,16);
+  return Buffer.concat([...locals,directory,end]);
+}
+test('invalid ZIPs, mismatched root manifests and missing notices are rejected',()=>{
+  const json=Buffer.from(JSON.stringify(manifest));
+  assert.equal(verifyArchive(zipFixture(json),json).size,3);
+  assert.throws(()=>verifyArchive(Buffer.from('not a zip'),json),/ZIP/);
+  assert.throws(()=>verifyArchive(zipFixture(Buffer.from('{}')),json),/package.json/);
+  assert.throws(()=>verifyArchive(zipFixture(json,{'NOTICE.txt':Buffer.alloc(0)}),json),/notice/);
+  assert.throws(()=>verifyArchive(zipFixture(json,{'../escape':Buffer.from('x')}),json),/path/);
+  const corrupted=zipFixture(json);corrupted[45]^=1;assert.throws(()=>verifyArchive(corrupted,json));
+});
+test('history comparison rejects hand-edited, deleted versions and removed published sources',t=>{
+  const root=fixture(t), git=(...args)=>execFileSync('git',['-C',root,...args],{stdio:['ignore','pipe','pipe']}).toString().trim();
+  git('init','-q');git('config','user.useConfigOnly','true');git('config','user.name','VPM tests');git('config','user.email','1+tests@users.noreply.github.com');git('config','core.autocrlf','false');
+  const directory=path.join(root,'packages',id);fs.mkdirSync(directory,{recursive:true});const target=path.join(directory,version+'.json'),bytes=JSON.stringify({...manifest,zipSHA256:'a'.repeat(64)})+'\n';fs.writeFileSync(target,bytes);git('add','.');git('commit','-qm','Fixture');const base=git('rev-parse','HEAD');
+  checkHistory(root,base);fs.writeFileSync(target,bytes.replace('a'.repeat(64),'0'.repeat(64)));assert.throws(()=>checkHistory(root,base),/changed or removed/);fs.unlinkSync(target);assert.throws(()=>checkHistory(root,base),/changed or removed/);fs.writeFileSync(target,bytes);fs.writeFileSync(path.join(root,'source.json'),JSON.stringify({...source,packages:{}}));assert.throws(()=>checkHistory(root,base),/source changed or removed/);
 });

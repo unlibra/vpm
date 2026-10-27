@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readJson, validateSource, validatePackage, stableVersion } from './listing.mjs';
+import { verifyArchive } from './archive.mjs';
 
 const requireThat = (value, message) => { if (!value) throw Error(message); };
 async function download(fetcher, url, limit, headers = {}) {
@@ -34,6 +35,7 @@ export async function importRelease(root, id, tag, fetcher = fetch) {
   const manifest = JSON.parse(manifestBytes);
   requireThat(!('zipSHA256' in manifest), 'ZIP hash belongs in the listing, not the package manifest.');
   const zip = await download(fetcher, asset(zipName), 64 * 1024 * 1024);
+  verifyArchive(zip, manifestBytes);
   // Each immutable version records the exact ZIP digest, never a moving latest URL.
   manifest.zipSHA256 = createHash('sha256').update(zip).digest('hex');
   validatePackage(manifest, id, version, entry.repository);

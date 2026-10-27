@@ -14,11 +14,12 @@ Node.js 24以降を使います。追加のnpmパッケージは不要です。
 
 ```sh
 node tools/import-release.mjs com.unlibra.mururu-blink-lipsync v1.2.0
+node tools/history.mjs <変更前のコミットSHA>
 node --test tools/listing.test.mjs
 node tools/listing.mjs
 ```
 
-新しい版のJSON、ZIPのSHA-256、生成結果をレビューしてコミットします。既存の版を削除・上書きしません。製品Releaseの公開だけでは一覧は更新されません。
+ZIP内のpackage.jsonとライセンスの同梱を検証し、版ごとのJSONとZIPのSHA-256を記録します。新しい版のJSONと生成結果をレビューしてコミットします。CIでは変更前のコミットにある版の変更・削除と公開済み製品の登録解除を拒否します。既存の版を削除・上書きしません。製品Releaseの公開だけでは一覧は更新されません。
 
 source.jsonは登録する製品、packages/は公開済みの版の記録、site/は生成結果です。ZIP本体と製品コードは各製品リポジトリで管理します。
 
