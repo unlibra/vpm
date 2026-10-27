@@ -1,0 +1,12 @@
+{
+  "name": "unlibra VPM Repository",
+  "id": "com.unlibra.vpm",
+  "url": "https://docs.unlibra.com/vpm/index.json",
+  "author": "unlibra",
+  "packages": {
+    "com.unlibra.mururu-blink-lipsync": {
+      "repository": "unlibra/mururu-blink-lipsync",
+      "displayName": "Mururu Blink & LipSync"
+    }
+  }
+}
