@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vpm-listing-${{ github.ref }}
+  group: vpm-validation-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -37,27 +37,3 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
-
-  deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.ENABLE_PAGES == 'true'
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Reject a superseded publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_REVISION: ${{ github.sha }}
-        run: |
-          CURRENT_REVISION="$(gh api repos/unlibra/vpm/git/ref/heads/main --jq '.object.sha')"
-          test "$CURRENT_REVISION" = "$EXPECTED_REVISION"
-      - name: Deploy verified listing
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

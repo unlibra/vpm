@@ -7,8 +7,9 @@ import { importRelease } from './import-release.mjs';
 const requireThat = (value, message) => { if (!value) throw Error(message); };
 export async function syncReleases(root, packageId, tag, fetcher = fetch) {
   const source = validateSource(readJson(path.join(root, 'source.json')));
-  requireThat(Object.hasOwn(source.packages, packageId) && typeof tag === 'string' && tag.startsWith('v') && stableVersion.test(tag.slice(1)), 'Unknown package or invalid stable release tag.');
-  const pending = new Map([[`${packageId}/${tag}`, { id: packageId, tag }]]);
+  const fullSync = !packageId && !tag;
+  requireThat(fullSync || (Object.hasOwn(source.packages, packageId) && typeof tag === 'string' && tag.startsWith('v') && stableVersion.test(tag.slice(1))), 'Unknown package or invalid stable release tag.');
+  const pending = new Map(fullSync ? [] : [[`${packageId}/${tag}`, { id: packageId, tag }]]);
   for (const [id, entry] of Object.entries(source.packages).sort()) {
     for (let page = 1; ; page++) {
       requireThat(page <= 100, 'Release inventory exceeds the reviewed pagination limit.');
@@ -53,7 +54,7 @@ export async function syncReleases(root, packageId, tag, fetcher = fetch) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const args = process.argv.slice(2);
-    requireThat(args.length === 2, 'Usage: node tools/sync-releases.mjs PACKAGE_ID vVERSION');
+    requireThat(args.length === 0 || args.length === 2, 'Usage: node tools/sync-releases.mjs [PACKAGE_ID vVERSION]');
     const changed = await syncReleases(path.dirname(path.dirname(fileURLToPath(import.meta.url))), args[0], args[1]);
     console.log(`Verified ${changed.length} new VPM versions across registered repositories.`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }

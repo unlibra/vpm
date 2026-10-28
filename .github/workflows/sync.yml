@@ -1,29 +1,31 @@
 name: Sync VPM releases
-run-name: Sync ${{ inputs.package_id }} ${{ inputs.release_tag }}
+run-name: Sync VPM releases ${{ inputs.package_id }} ${{ inputs.release_tag }}
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       package_id:
         description: Registered VPM package ID
-        required: true
+        required: false
         type: string
       release_tag:
         description: Published stable release tag
-        required: true
+        required: false
         type: string
 
 permissions:
   contents: read
 
-# All surviving requests import the entire backlog, including superseded requests.
+# Every main publication imports the backlog, including cancelled pending notifications.
 concurrency:
   group: vpm-listing-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   sync:
-    if: github.repository == 'unlibra/vpm' && github.ref == 'refs/heads/main'
+    if: github.repository == 'unlibra/vpm' && github.ref == 'refs/heads/main' && vars.ENABLE_PAGES == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -61,7 +63,7 @@ jobs:
       - name: Record new immutable versions
         id: record
         run: |
-          git add -- packages
+          if [ -d packages ]; then git add -- packages; fi
           if ! git diff --cached --quiet; then
             git config user.useConfigOnly true
             git config user.name 'github-actions[bot]'

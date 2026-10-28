@@ -94,3 +94,27 @@ test('unknown packages and invalid tags stop before contacting GitHub', async t 
   await assert.rejects(syncReleases(root, 'com.other.tool', 'v1.2.0', fetcher), /Unknown/);
   await assert.rejects(syncReleases(root, id, '../../escape', fetcher), /invalid/);
 });
+
+test('a surviving main publication recovers releases whose pending notifications were cancelled', async t => {
+  const root = fixture(t);
+  const { fetcher } = remote(source, { [`${repo}:1`]: [release(id, repo, '1.2.0'), release(id, repo, '1.2.1')] });
+  assert.equal((await syncReleases(root, '', '', fetcher)).length, 2);
+  assert.equal((await syncReleases(root, undefined, undefined, fetcher)).length, 0);
+  const workflowRoot = path.resolve(import.meta.dirname, '..', '.github', 'workflows');
+  const sync = fs.readFileSync(path.join(workflowRoot, 'sync.yml'), 'utf8');
+  const validation = fs.readFileSync(path.join(workflowRoot, 'listing.yml'), 'utf8');
+  assert.match(sync, /push:\s+branches: \[main\]/);
+  assert.match(sync, /workflow_dispatch:/);
+  assert.match(sync, /node tools\/sync-releases\.mjs "\$PACKAGE_ID" "\$RELEASE_TAG"/);
+  assert.doesNotMatch(validation, /actions\/deploy-pages/);
+  assert.doesNotMatch(validation, /group: vpm-listing-/);
+});
+
+test('an empty initial catalog can be published and partial notification inputs are rejected', async t => {
+  const root = fixture(t);
+  assert.deepEqual(await syncReleases(root, '', '', remote(source, {}).fetcher), []);
+  assert.ok(!fs.existsSync(path.join(root, 'packages')));
+  const fetcher = async () => { throw Error('must not fetch'); };
+  await assert.rejects(syncReleases(root, id, '', fetcher), /invalid/);
+  await assert.rejects(syncReleases(root, '', 'v1.2.0', fetcher), /Unknown/);
+});
