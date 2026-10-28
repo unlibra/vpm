@@ -9,8 +9,12 @@ unlibraのUnityツールをVRChat Creator Companion（VCC）から導入・更�
 ## 自動更新の初期設定
 
 1. mainを既定ブランチにし、GitHub PagesをGitHub Actions方式で設定します。ENABLE_PAGESをtrueにして、Sync VPM releasesを入力欄を空のまま手動実行し、初期一覧を配信します。
-2. unlibra/vpmだけを対象に、Actions read/write権限を持つfine-grained personal access tokenを用意します。Contents write権限は不要です。
-3. 製品リポジトリのActions SecretへVPM_DISPATCH_TOKENという名前で登録します。トークンをGitや文書へ保存しません。期限を設けた場合は期限前に更新します。
+2. 通知専用のGitHub Appを登録し、Repository permissionsはActions read/writeだけを付けます。Metadata readは自動で付与されます。Contents writeは不要です。外部のWebhook受信サーバーは使わないため、Webhookは無効にします。Appをunlibraにインストールするときは、対象リポジトリをvpmだけに限定します。
+3. 製品リポジトリのActions変数VPM_APP_CLIENT_IDにAppのClient IDを登録し、Actions Secret VPM_APP_PRIVATE_KEYにAppの秘密鍵を登録します。秘密鍵はGitや文書へ保存しません。更新時は新しい鍵をSecretへ登録して動作を確認してから古い鍵を失効させます。
+
+各製品のRelease CIは、GitHub公式のactions/create-github-app-tokenを使い、ownerをunlibra、repositoriesをvpm、permission-actionsをwriteと明示して短期トークンを生成します。トークンは最長1時間で期限切れになり、通常はジョブ終了時に失効させます。公開前の確認と公開後の通知は別ジョブなので、それぞれで生成します。長期PATの登録は不要です。
+
+App登録と認証の手順は[GitHub公式ドキュメント](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow)を参照してください。
 
 製品のRelease CIが公開後にsync.ymlを起動します。mainへの通常のpushでも同じ公開処理を実行します。このワークフローはmainでのみ実行し、公開済みの安定版ZIP・package.jsonを検証して未登録の版をコミットし、同じ実行内でPagesへ配信します。製品側は対象の実行IDを追跡し、公開一覧にその版が現れるまで待ちます。通知だけが失敗した場合は、製品のnotify-vpmジョブを再実行してください。
 
