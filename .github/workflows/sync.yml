@@ -1,0 +1,85 @@
+name: Sync VPM releases
+run-name: Sync ${{ inputs.package_id }} ${{ inputs.release_tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_id:
+        description: Registered VPM package ID
+        required: true
+        type: string
+      release_tag:
+        description: Published stable release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# All surviving requests import the entire backlog, including superseded requests.
+concurrency:
+  group: vpm-listing-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'unlibra/vpm' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Require publication to be enabled
+        env:
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+        run: test "$ENABLE_PAGES" = true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          # This trusted main-only job must push version metadata to its own repo.
+          persist-credentials: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Test, import and verify published history
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PACKAGE_ID: ${{ inputs.package_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          node --test tools/listing.test.mjs tools/sync.test.mjs
+          BASE_COMMIT="$(git rev-parse HEAD)"
+          node tools/sync-releases.mjs "$PACKAGE_ID" "$RELEASE_TAG"
+          node tools/history.mjs "$BASE_COMMIT"
+          node tools/listing.mjs
+      - name: Record new immutable versions
+        id: record
+        run: |
+          git add -- packages
+          if ! git diff --cached --quiet; then
+            git config user.useConfigOnly true
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Record verified VPM releases'
+            git push origin HEAD:main
+          fi
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - name: Reject a superseded publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REVISION: ${{ steps.record.outputs.revision }}
+        run: |
+          CURRENT_REVISION="$(gh api repos/unlibra/vpm/git/ref/heads/main --jq '.object.sha')"
+          test "$CURRENT_REVISION" = "$EXPECTED_REVISION"
+      - name: Deploy the verified listing
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
