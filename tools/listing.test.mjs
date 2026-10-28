@@ -62,3 +62,10 @@ test('an already-committed deletion cannot be hidden by manual or later builds',
   assert.throws(()=>checkHistory(root,git('rev-parse','HEAD')),/changed or removed/);
   fs.writeFileSync(path.join(root,'notes.txt'),'Another commit');git('add','.');git('commit','-qm','Later fixture');assert.throws(()=>checkHistory(root,git('rev-parse','HEAD')),/changed or removed/);
 });
+
+test('published ancestors cannot be hidden by a merge using the stale branch tree',t=>{
+  const root=fixture(t),git=(...args)=>execFileSync('git',['-C',root,...args],{stdio:['ignore','pipe','pipe']}).toString().trim();
+  git('init','-q','--initial-branch=main');git('config','user.useConfigOnly','true');git('config','user.name','VPM tests');git('config','user.email','1+tests@users.noreply.github.com');git('config','core.autocrlf','false');git('add','.');git('commit','-qm','Initial fixture');git('branch','stale');
+  const directory=path.join(root,'packages',id);fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(path.join(directory,version+'.json'),JSON.stringify({...manifest,zipSHA256:'a'.repeat(64)}));git('add','.');git('commit','-qm','Published fixture');git('checkout','-q','stale');fs.writeFileSync(path.join(root,'notes.txt'),'stale branch');git('add','.');git('commit','-qm','Stale fixture');git('merge','-q','-s','ours','main','-m','Retain stale tree');
+  assert.throws(()=>checkHistory(root,git('rev-parse','HEAD')),/changed or removed/);
+});
