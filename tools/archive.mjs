@@ -9,7 +9,7 @@ export function verifyArchive(bytes, manifestBytes) {
   requireThat(count > 0 && count === bytes.readUInt16LE(end + 8) && bytes.readUInt32LE(end + 4) === 0 && start + size === end,
     'Invalid VPM ZIP directory.');
   let cursor = start, total = 0;
-  const files = new Map(), ranges = [];
+  const files = new Map(), ranges = [], canonical = new Map(), explicit = new Set();
   for (let i = 0; i < count; i++) {
     requireThat(cursor + 46 <= end && bytes.readUInt32LE(cursor) === 0x02014b50, 'Invalid ZIP entry.');
     const flags = bytes.readUInt16LE(cursor + 8), method = bytes.readUInt16LE(cursor + 10), checksum = bytes.readUInt32LE(cursor + 16);
@@ -24,6 +24,15 @@ export function verifyArchive(bytes, manifestBytes) {
     requireThat(/^[A-Za-z0-9_.\/-]+$/.test(normalized) && !normalized.startsWith('/') &&
       normalized.split('/').every(p => p && p !== '.' && p !== '..') && !files.has(name) &&
       !/^(Assets|Packages|Tests|Generated)(\/|$)/.test(normalized), 'Unsafe or duplicate ZIP path.');
+    const key = normalized.toLowerCase(), parts = key.split('/');
+    requireThat(!explicit.has(key) && parts.every(p => !p.endsWith('.') && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/.test(p)), 'Windows filename collision or reserved path.');
+    for (let j = 1; j < parts.length; j++) {
+      const parent = parts.slice(0, j).join('/');
+      requireThat(canonical.get(parent) !== 'file', 'ZIP file/directory conflict.');
+      canonical.set(parent, 'directory');
+    }
+    requireThat(!canonical.has(key) || name.endsWith('/') && canonical.get(key) === 'directory', 'ZIP file/directory conflict.');
+    canonical.set(key, name.endsWith('/') ? 'directory' : 'file'); explicit.add(key);
     requireThat(local + 30 <= start && bytes.readUInt32LE(local) === 0x04034b50 &&
       bytes.readUInt16LE(local + 6) === flags && bytes.readUInt16LE(local + 8) === method &&
       bytes.readUInt16LE(local + 26) === length, 'Invalid ZIP local header.');

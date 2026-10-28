@@ -28,7 +28,7 @@ jobs:
           node-version: 24
       - name: Protect published versions
         env:
-          BASE_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before || '0000000000000000000000000000000000000000' }}
+          BASE_COMMIT: ${{ github.event.pull_request.base.sha || github.sha }}
         run: node tools/history.mjs "$BASE_COMMIT"
       - name: Test and build listing
         run: |

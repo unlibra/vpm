@@ -47,3 +47,18 @@ test('history comparison rejects hand-edited, deleted versions and removed publi
   const directory=path.join(root,'packages',id);fs.mkdirSync(directory,{recursive:true});const target=path.join(directory,version+'.json'),bytes=JSON.stringify({...manifest,zipSHA256:'a'.repeat(64)})+'\n';fs.writeFileSync(target,bytes);git('add','.');git('commit','-qm','Fixture');const base=git('rev-parse','HEAD');
   checkHistory(root,base);fs.writeFileSync(target,bytes.replace('a'.repeat(64),'0'.repeat(64)));assert.throws(()=>checkHistory(root,base),/changed or removed/);fs.unlinkSync(target);assert.throws(()=>checkHistory(root,base),/changed or removed/);fs.writeFileSync(target,bytes);fs.writeFileSync(path.join(root,'source.json'),JSON.stringify({...source,packages:{}}));assert.throws(()=>checkHistory(root,base),/source changed or removed/);
 });
+
+test('ZIP names reject Windows aliases and file/directory conflicts',()=>{
+  const json=Buffer.from(JSON.stringify(manifest));
+  for(const name of ['PACKAGE.JSON','package.json.','CON.txt','Editor.'])
+    assert.throws(()=>verifyArchive(zipFixture(json,{[name]:Buffer.from('bad')}),json),/Windows|conflict/);
+  assert.throws(()=>verifyArchive(zipFixture(json,{'Editor':Buffer.from('file'),'Editor/a.cs':Buffer.from('code')}),json),/conflict/);
+  assert.throws(()=>verifyArchive(zipFixture(json,{'Editor/a.cs':Buffer.from('code'),'Editor':Buffer.from('file')}),json),/conflict/);
+});
+test('an already-committed deletion cannot be hidden by manual or later builds',t=>{
+  const root=fixture(t),git=(...args)=>execFileSync('git',['-C',root,...args],{stdio:['ignore','pipe','pipe']}).toString().trim();
+  git('init','-q');git('config','user.useConfigOnly','true');git('config','user.name','VPM tests');git('config','user.email','1+tests@users.noreply.github.com');git('config','core.autocrlf','false');
+  const directory=path.join(root,'packages',id);fs.mkdirSync(directory,{recursive:true});const target=path.join(directory,version+'.json');fs.writeFileSync(target,JSON.stringify({...manifest,zipSHA256:'a'.repeat(64)}));git('add','.');git('commit','-qm','Published fixture');fs.unlinkSync(target);git('add','-A');git('commit','-qm','Invalid deletion');
+  assert.throws(()=>checkHistory(root,git('rev-parse','HEAD')),/changed or removed/);
+  fs.writeFileSync(path.join(root,'notes.txt'),'Another commit');git('add','.');git('commit','-qm','Later fixture');assert.throws(()=>checkHistory(root,git('rev-parse','HEAD')),/changed or removed/);
+});
